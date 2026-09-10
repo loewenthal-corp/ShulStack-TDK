@@ -37,6 +37,11 @@ if (vercelEnv !== "production" && keyScope === "prod") {
   process.exit(0);
 }
 
+// Preview-scoped keys authorize against a named preview deployment, not the
+// project's dev deployment. `convex deploy` names that preview from the git
+// branch; env list/set must use the same selector or they fail to authorize.
+const convexEnvSelector = previewEnvSelector(keyScope);
+
 // Fresh preview backends only exist after `convex deploy`, so tolerate failure
 // before the deploy and require success after it.
 ensureAuthEnv({ required: false });
@@ -84,8 +89,26 @@ function vercelSiteUrl() {
   return host ? `https://${host}` : undefined;
 }
 
+function previewName() {
+  return process.env.VERCEL_GIT_COMMIT_REF || process.env.CI_COMMIT_REF_NAME || null;
+}
+
+function previewEnvSelector(scope) {
+  if (scope !== "preview") {
+    return [];
+  }
+  const name = previewName();
+  if (!name) {
+    console.error(
+      "Preview deploy key requires VERCEL_GIT_COMMIT_REF (or CI_COMMIT_REF_NAME) to select the Convex preview deployment.",
+    );
+    process.exit(1);
+  }
+  return ["--preview-name", name];
+}
+
 function convexEnvList() {
-  const result = spawnSync("pnpm", ["exec", "convex", "env", "list"], {
+  const result = spawnSync("pnpm", ["exec", "convex", "env", "list", ...convexEnvSelector], {
     encoding: "utf8",
   });
   if (result.status !== 0) {
@@ -102,7 +125,9 @@ function convexEnvList() {
 }
 
 function convexEnvSet(name, value) {
-  run("pnpm", ["exec", "convex", "env", "set", "--", name, value], { quiet: true });
+  run("pnpm", ["exec", "convex", "env", "set", ...convexEnvSelector, "--", name, value], {
+    quiet: true,
+  });
   log(`Set ${name} on the Convex deployment.`);
 }
 
